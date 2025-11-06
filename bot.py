@@ -7,7 +7,8 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 from datetime import datetime  # Added for timestamp logging
 
 BOT_TOKEN = '8295141633:AAFCy_rNDTdSEm6O7Wtbd9SqmTB1DIeJ2zg'
-CHANNEL_USERNAME = '@earning_don_00'
+CHANNEL_USERNAME = 'earning_don_00'
+Chat ID: -100123456789
 
 # Load or initialize user codes
 if os.path.exists("user_codes.json"):
@@ -17,8 +18,8 @@ else:
     user_codes = {}
 
 def save_codes():
-    with open("user_codes.json", "w") as f:
-        json.dump(user_codes, f)
+    with open("user_codes.json", "w", encoding="utf-8") as f:
+    json.dump(user_codes, f, ensure_ascii=False)
 
 def generate_code():
     return ''.join(random.choices(string.ascii_uppercase, k=8))
