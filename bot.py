@@ -1,5 +1,8 @@
-import os, threading
-from flask import Flask
+import json
+import os
+import random
+import string
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
 BOT_TOKEN = '8295141633:AAFCy_rNDTdSEm6O7Wtbd9SqmTB1DIeJ2zg'
@@ -55,20 +58,11 @@ async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.callback_query.message.reply_text("❌ Try again! Please join the channel first.", reply_markup=reply_markup)
 
-def run_bot():
-    app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
+def main():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(verify, pattern="verify"))
     app.run_polling()
 
-flask_app = Flask(__name__)
-
-@flask_app.route("/")
-def health():
-    return "ok"
-
-if __name__ == "__main__":
-    threading.Thread(target=run_bot, daemon=True).start()
-    port = int(os.getenv("PORT", 10000))
-    flask_app.run(host="0.0.0.0", port=port)
-    
+if __name__ == '__main__':
+    main()
