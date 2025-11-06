@@ -17,13 +17,13 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# ================== CONFIG via env ==================
+# ================== CONFIG (Env से) ==================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")  # required
-CHANNEL_USERNAME = os.environ.get("CHANNEL_USERNAME")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # required: e.g. https://your-app.onrender.com/webhook
-SECRET_TOKEN = os.environ.get("SECRET_TOKEN", "change-me")  # to verify Telegram requests
+CHANNEL_USERNAME = os.environ.get("CHANNEL_USERNAME", "@earning_don_00")  # default दिया
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # required: https://<app>.onrender.com/webhook
+SECRET_TOKEN = os.environ.get("SECRET_TOKEN", "change-me")  # Telegram header verify
 CODES_FILE = Path("user_codes.json")
-# ====================================================
+# =====================================================
 
 # ---- basic checks ----
 if not BOT_TOKEN:
@@ -44,39 +44,41 @@ app = Flask(__name__)
 # Telegram Application (PTB v20)
 application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-# Async event loop in background thread (so Flask can stay sync)
+# Async event loop in background thread (ताकि Flask sync रह सके)
 loop = asyncio.new_event_loop()
 
-
+# ---------------- Utils / Storage ----------------
 def generate_code(length: int = 8) -> str:
     alphabet = string.ascii_uppercase
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
-
 user_codes: dict[str, str] = {}
 codes_lock = asyncio.Lock()
 
-
 async def load_codes() -> None:
+    """user_codes.json load करें"""
     global user_codes
     if CODES_FILE.exists():
         try:
             async with codes_lock:
                 user_codes = json.loads(CODES_FILE.read_text(encoding="utf-8"))
+                log.info("Loaded %d user codes", len(user_codes))
         except Exception as e:
             log.warning("Failed to read user_codes.json: %s", e)
             user_codes = {}
     else:
         user_codes = {}
 
-
 async def save_codes() -> None:
+    """user_codes.json save करें"""
     try:
         async with codes_lock:
-            CODES_FILE.write_text(json.dumps(user_codes, ensure_ascii=False), encoding="utf-8")
+            CODES_FILE.write_text(
+                json.dumps(user_codes, ensure_ascii=False),
+                encoding="utf-8",
+            )
     except Exception as e:
         log.error("Failed to write user_codes.json: %s", e)
-
 
 def main_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -84,11 +86,10 @@ def main_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("Verify", callback_data="verify")]
     ])
 
-
-
 # ---------------- Handlers ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+    log.info("Handling /start for user: %s", user.id if user else None)
     if not user:
         return
     uid = str(user.id)
@@ -102,7 +103,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reply_markup=main_keyboard(),
     )
 
-
 async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query:
@@ -110,6 +110,7 @@ async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await query.answer()
 
     uid = str(query.from_user.id)
+    log.info("Verify pressed by user: %s", uid)
 
     try:
         member = await context.bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=int(uid))
@@ -134,15 +135,19 @@ async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
     else:
         await query.message.reply_text(
-            "❌ Try again! Please join the channel first.", reply_markup=main_keyboard()
+            "❌ Try again! Please join the channel first.",
+            reply_markup=main_keyboard(),
         )
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    log.exception("Handler error: %s", context.error)
 
 # ------------- PTB startup/shutdown -------------
 async def ptb_startup():
     # register handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(verify, pattern="^verify$"))
+    application.add_error_handler(error_handler)
 
     await load_codes()
     await application.initialize()
@@ -156,7 +161,6 @@ async def ptb_startup():
     )
     log.info("Webhook set to %s", WEBHOOK_URL)
 
-
 async def ptb_shutdown():
     try:
         await application.bot.delete_webhook(drop_pending_updates=True)
@@ -165,46 +169,50 @@ async def ptb_shutdown():
     await application.stop()
     await application.shutdown()
 
-
 def run_loop_forever():
     asyncio.set_event_loop(loop)
     loop.run_forever()
-
 
 # fire up background loop + PTB
 bg = Thread(target=run_loop_forever, daemon=True)
 bg.start()
 asyncio.run_coroutine_threadsafe(ptb_startup(), loop)
 
-
 # ---------------- Flask routes ----------------
 @app.route("/", methods=["GET"])
 def index():
     return "Bot is alive", 200
 
-
 @app.route("/webhook", methods=["POST"])
 def telegram_webhook():
     # Verify Telegram secret token (set in set_webhook above)
     if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != SECRET_TOKEN:
+        log.warning("Webhook hit with wrong/missing secret")
         abort(403)
 
     data = request.get_json(force=True, silent=True)
     if not data:
+        log.warning("Webhook got empty/invalid JSON")
         return "no json", 400
+
+    # helpful trace
+    try:
+        txt = data.get("message", {}).get("text")
+        cb  = data.get("callback_query", {}).get("data")
+        log.info("Webhook update: %s", txt or cb)
+    except Exception:
+        pass
 
     update = Update.de_json(data, application.bot)
     # hand over to PTB (non-blocking)
     asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
     return "ok", 200
 
-
-# graceful shutdown (optional hook for some hosts)
+# graceful shutdown (optional)
 @app.route("/shutdown", methods=["POST"])
 def shutdown():
     asyncio.run_coroutine_threadsafe(ptb_shutdown(), loop)
     return "shutting down", 200
-
 
 # local dev entrypoint
 if __name__ == "__main__":
