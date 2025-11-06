@@ -174,19 +174,12 @@ def run_loop_forever():
     loop.run_forever()
 
 
-bot_started = False
+# Flask app और PTB application बनने के तुरंत बाद:
+bg = Thread(target=run_loop_forever, daemon=True)
+bg.start()
+asyncio.run_coroutine_threadsafe(ptb_startup(), loop)
+log.info("PTB started (import-time)")
 
-@app.before_first_request
-def start_bot_in_worker():
-    global bot_started
-    if bot_started:
-        return
-    bot_started = True
-    # background loop/thread start
-    bg = Thread(target=run_loop_forever, daemon=True)
-    bg.start()
-    asyncio.run_coroutine_threadsafe(ptb_startup(), loop)
-    log.info("PTB started in gunicorn worker")
 
 
 # ---------------- Flask routes ----------------
