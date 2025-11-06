@@ -79,12 +79,11 @@ async def save_codes() -> None:
 
 
 def main_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("Join Channel", url=f"https://t.me/earning_don_00('@earning_don_00')}")],
-            [InlineKeyboardButton("Verify", callback_data="verify")],
-        ]
-    )
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Join Channel", url="https://t.me/earning_don_00")],
+        [InlineKeyboardButton("Verify", callback_data="verify")]
+    ])
+
 
 
 # ---------------- Handlers ----------------
