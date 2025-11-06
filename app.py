@@ -173,10 +173,21 @@ def run_loop_forever():
     asyncio.set_event_loop(loop)
     loop.run_forever()
 
-# fire up background loop + PTB
-bg = Thread(target=run_loop_forever, daemon=True)
-bg.start()
-asyncio.run_coroutine_threadsafe(ptb_startup(), loop)
+
+bot_started = False
+
+@app.before_first_request
+def start_bot_in_worker():
+    global bot_started
+    if bot_started:
+        return
+    bot_started = True
+    # background loop/thread start
+    bg = Thread(target=run_loop_forever, daemon=True)
+    bg.start()
+    asyncio.run_coroutine_threadsafe(ptb_startup(), loop)
+    log.info("PTB started in gunicorn worker")
+
 
 # ---------------- Flask routes ----------------
 @app.route("/", methods=["GET"])
