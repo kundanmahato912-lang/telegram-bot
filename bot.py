@@ -4,6 +4,7 @@ import random
 import string
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from datetime import datetime  # Added for timestamp logging
 
 BOT_TOKEN = '8295141633:AAFCy_rNDTdSEm6O7Wtbd9SqmTB1DIeJ2zg'
 CHANNEL_USERNAME = '@earning_don_00'
@@ -43,6 +44,8 @@ async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if chat_member.status in ['member', 'administrator', 'creator']:
         code = user_codes.get(user_id)
+        print(f"[{datetime.now()}] ✅ User {user_id} verified with code: {code}")  # Log to Render
+
         keyboard = [[InlineKeyboardButton("Scratch Card", url="https://scratchcard.page.gd")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.callback_query.message.reply_text(
