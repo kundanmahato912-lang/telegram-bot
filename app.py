@@ -4,6 +4,7 @@ import json
 import random
 import string
 import threading
+import base64
 from datetime import datetime
 from flask import Flask, request, jsonify
 import requests
@@ -26,7 +27,14 @@ USERS_FILE = "users.json"
 LOG_FILE = "logs.txt"
 _file_lock = threading.Lock()
 
+# ====== GitHub settings (for committing logs.txt) ======
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
+GITHUB_REPO = os.environ.get("GITHUB_REPO", "").strip()          # e.g. "kundanmahto912-lang/telegram-bot"
+GITHUB_BRANCH = os.environ.get("GITHUB_BRANCH", "main").strip()   # e.g. "main"
+GITHUB_FILE_PATH = os.environ.get("GITHUB_FILE_PATH", "logs.txt").strip()
 
+
+# ============== TELEGRAM HELPERS ==============
 def tg_request(method: str, payload: dict):
     url = f"{API_BASE}/{method}"
     r = requests.post(url, json=payload, timeout=20)
@@ -71,6 +79,7 @@ def get_member_status(user_id):
     return False
 
 
+# ============== LOCAL STORAGE HELPERS ==============
 def load_users():
     with _file_lock:
         if not os.path.exists(USERS_FILE):
@@ -88,8 +97,71 @@ def save_users(data):
             json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+# ============== GITHUB LOG APPEND ==============
+def github_append_line(line: str):
+    """
+    logs.txt में नई line GitHub repo पर commit करता है।
+    requirements:
+      - GITHUB_TOKEN (repo scope)
+      - GITHUB_REPO  -> "user/repo"
+      - GITHUB_BRANCH -> "main"
+      - GITHUB_FILE_PATH -> "logs.txt"
+    """
+    if not (GITHUB_TOKEN and GITHUB_REPO and GITHUB_FILE_PATH):
+        # GitHub config नहीं है, तो skip कर दें
+        return False, "missing_github_env"
+
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json"
+    }
+    # 1) पहले current file fetch करें (sha और content के लिए)
+    get_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
+    params = {"ref": GITHUB_BRANCH}
+    r = requests.get(get_url, headers=headers, params=params, timeout=20)
+
+    content_str = ""
+    sha = None
+    if r.status_code == 200:
+        data = r.json()
+        sha = data.get("sha")
+        encoded = data.get("content", "")
+        if encoded:
+            try:
+                content_bytes = base64.b64decode(encoded)
+                content_str = content_bytes.decode("utf-8")
+            except Exception:
+                content_str = ""
+    elif r.status_code == 404:
+        # फ़ाइल अभी repo में नहीं है; हम create करेंगे
+        content_str = ""
+        sha = None
+    else:
+        return False, f"get_failed:{r.status_code}:{r.text}"
+
+    # 2) नई line append करें
+    new_content = content_str + ("" if content_str.endswith("\n") or content_str == "" else "\n") + line
+    new_b64 = base64.b64encode(new_content.encode("utf-8")).decode("utf-8")
+
+    # 3) PUT करके commit करें
+    put_url = get_url
+    payload = {
+        "message": f"chore(logs): append entry {datetime.utcnow().isoformat()}Z",
+        "content": new_b64,
+        "branch": GITHUB_BRANCH,
+    }
+    if sha:
+        payload["sha"] = sha
+
+    pr = requests.put(put_url, headers=headers, json=payload, timeout=20)
+    if pr.status_code in (200, 201):
+        return True, "ok"
+    else:
+        return False, f"put_failed:{pr.status_code}:{pr.text}"
+
+
 def get_or_create_code(user_id, username):
-    """हर यूज़र को सिर्फ एक बार 8-digit कोड देता है"""
+    """हर यूज़र को सिर्फ एक बार 8-digit कोड देता है + logs.txt (local + GitHub) में लिखता है"""
     users = load_users()
     key = str(user_id)
     if key in users and "code" in users[key]:
@@ -99,11 +171,20 @@ def get_or_create_code(user_id, username):
     users[key] = {"code": code, "username": username or ""}
     save_users(users)
 
-    # लॉग्स में सेव करें
+    # ---------- Local log (Render FS) ----------
     line = f"{datetime.utcnow().isoformat()}Z\t{username or user_id}\t{code}\n"
     with _file_lock:
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(line)
+
+    # ---------- GitHub log (commit) ----------
+    try:
+        ok, info = github_append_line(line.strip("\n"))
+        if not ok:
+            # चाहें तो owner chat पर error भेज सकते हैं; अभी चुपचाप fail- safe
+            pass
+    except Exception:
+        pass
 
     return code
 
@@ -122,6 +203,7 @@ def send_join_prompt(chat_id):
     return send_message(chat_id, text, reply_markup=join_and_verify_keyboard())
 
 
+# ============== ROUTES ==============
 @app.route("/", methods=["GET"])
 def index():
     return jsonify({"ok": True, "msg": "Bot is running"})
