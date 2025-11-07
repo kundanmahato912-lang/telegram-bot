@@ -279,18 +279,3 @@ def gh_test():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8000"))
     app.run(host="0.0.0.0", port=port)
-
-@app.route("/env-check", methods=["GET"])
-def env_check():
-    return jsonify({
-        "GITHUB_TOKEN_present": bool(GITHUB_TOKEN),
-        "GITHUB_REPO": GITHUB_REPO,
-        "GITHUB_BRANCH": GITHUB_BRANCH,
-        "GITHUB_FILE_PATH": GITHUB_FILE_PATH,
-    })
-
-@app.route("/gh-test", methods=["GET"])
-def gh_test():
-    line = f"{datetime.utcnow().isoformat()}Z\tTEST\t12345678"
-    ok, info = github_append_line(line)
-    return jsonify({"ok": ok, "info": info})
