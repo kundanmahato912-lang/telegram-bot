@@ -138,7 +138,7 @@ def webhook():
                     users[r]["points"]+=2
                     users[uid]["referral_paid"]=True
                     save_json(USERS_FILE,users)
-                send(uid,f"🎟 <b>Your Scratch Code</b>\n<code>{code}</code>",
+                send(uid,f"🎉 Congratulation you win a scratch card\n\nYour code:<code>{code}</code>",
                      {"inline_keyboard":[[{"text":"🎟 Open Scratch","url":SCRATCH_LINK}]]})
                 send(uid,"👇 Choose option",menu(uid))
             else:
