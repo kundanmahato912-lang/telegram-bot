@@ -32,9 +32,6 @@ def ensure_files():
             with open(f, "w", encoding="utf-8") as fp:
                 fp.write("{}" if f.endswith(".json") else "")
 ensure_files()
-
-if RESET_ALL_USERS:
-    save_json(USERS_FILE, {})
     
 # ===== GITHUB LOGGING =====
 def github_append_log(line):
