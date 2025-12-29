@@ -17,6 +17,8 @@ SCRATCH_LINK = "https://scratchcard.page.gd"
 BOT_USERNAME = "Scratch_card_00_bot"   # ⚠️ NO @
 ADMIN_ID = 7336276055
 
+RESET_ALL_USERS = True
+
 USERS_FILE = "users.json"
 REDEEM_FILE = "redeems.json"
 LOG_FILE = "logs.txt"
@@ -31,6 +33,9 @@ def ensure_files():
                 fp.write("{}" if f.endswith(".json") else "")
 ensure_files()
 
+if RESET_ALL_USERS:
+    save_json(USERS_FILE, {})
+    
 # ===== GITHUB LOGGING =====
 def github_append_log(line):
     token = os.environ.get("GITHUB_TOKEN")
