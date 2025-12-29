@@ -17,7 +17,7 @@ SCRATCH_LINK = "https://scratchcard.page.gd"
 BOT_USERNAME = "Scratch_card_00_bot"   # ⚠️ NO @
 ADMIN_ID = 7336276055
 
-RESET_ALL_USERS = True
+RESET_ALL_USERS = False
 
 USERS_FILE = "users.json"
 REDEEM_FILE = "redeems.json"
