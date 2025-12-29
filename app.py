@@ -14,7 +14,7 @@ CHANNEL_USERNAME = "@earning_don_00"
 CHANNEL_LINK = "https://t.me/earning_don_00"
 SCRATCH_LINK = "https://scratchcard.page.gd"
 
-BOT_USERNAME = "Scratch_card_00_bot"   # ❌ no @
+BOT_USERNAME = "Scratch_card_00_bot"   # ⚠️ NO @
 ADMIN_ID = 7336276055
 
 USERS_FILE = "users.json"
@@ -23,11 +23,25 @@ LOG_FILE = "logs.txt"
 
 pending_redeem = {}
 
+# ===== ENSURE FILES EXIST (CRITICAL) =====
+def ensure_files():
+    for f in [USERS_FILE, REDEEM_FILE, LOG_FILE]:
+        if not os.path.exists(f):
+            with open(f, "w", encoding="utf-8") as fp:
+                if f.endswith(".json"):
+                    fp.write("{}")
+                else:
+                    fp.write("")
+
+ensure_files()
+
 # ===== SAFE LOG WRITE =====
 def append_log(text):
     try:
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(text + "\n")
+            f.flush()
+            os.fsync(f.fileno())
     except Exception as e:
         print("LOG ERROR:", e)
 
@@ -198,18 +212,24 @@ def webhook():
                 send_message(chat_id, "💳 Enter your UPI ID:")
 
         elif data.startswith("admin_") and int(uid) == ADMIN_ID:
-            _, action, rid = data.split("_")
+            answer_callback_query(cq["id"], "Processing...")
+            parts = data.split("_")
+            if len(parts) != 3:
+                return jsonify(ok=True)
+
+            _, action, rid = parts
             redeems = load_json(REDEEM_FILE)
             if rid not in redeems:
+                answer_callback_query(cq["id"], "Already done")
                 return jsonify(ok=True)
 
             r = redeems[rid]
-            r["status"] = "paid" if action=="paid" else "rejected"
+            r["status"] = "paid" if action == "paid" else "rejected"
             save_json(REDEEM_FILE, redeems)
 
             send_message(
                 r["user_id"],
-                "✅ Payment sent successfully" if action=="paid"
+                "✅ Payment sent successfully" if action == "paid"
                 else "❌ Redeem rejected"
             )
 
@@ -217,6 +237,7 @@ def webhook():
                 f"{datetime.utcnow()} ADMIN_{r['status']} "
                 f"USER:{r['username']} AMOUNT:{r['amount']} UPI:{r['upi']}"
             )
+            answer_callback_query(cq["id"], "Done ✅")
 
         return jsonify(ok=True)
 
@@ -226,7 +247,7 @@ def webhook():
         uid = str(msg["chat"]["id"])
         text = msg.get("text","")
 
-        # ===== ADMIN DASHBOARD (TOP PRIORITY) =====
+        # ===== ADMIN DASHBOARD =====
         if text in ["/admin", "🛠 Admin Dashboard"] and int(uid) == ADMIN_ID:
             redeems = load_json(REDEEM_FILE)
             pending = {k:v for k,v in redeems.items() if v["status"]=="pending"}
