@@ -253,18 +253,48 @@ def webhook():
         return jsonify(ok=True)
 
     # MESSAGE
-    if "message" in update:
-        msg = update["message"]
-        uid = str(msg["chat"]["id"])
-        text = msg.get("text","")
+if "message" in update:
+    msg = update["message"]
+    uid = str(msg["chat"]["id"])
+    text = msg.get("text", "")
 
-        if text.startswith("/start"):
-            parts = text.split()
-            if len(parts) > 1:
-                handle_referral(uid, parts[1])
-            send_message(uid, "Join channel & verify", join_kb())
+    if text.startswith("/start"):
+        parts = text.split()
+        if len(parts) > 1:
+            handle_referral(uid, parts[1])
+        send_message(uid, "Join channel & verify", join_kb())
 
-    return jsonify(ok=True)
+    elif text == "🎁 Refer & Earn":
+        users = load_json(USERS_FILE)
+        pts = users.get(uid, {}).get("points", 0)
+
+        send_message(
+            uid,
+            "👥 <b>Refer & Earn</b>\n\n"
+            "1 Refer = 2 Points\n"
+            "1 Point = ₹1\n\n"
+            f"🔗 Your Referral Link:\n{referral_link(uid)}\n\n"
+            f"🎁 Your Points: {pts}"
+        )
+
+    elif text == "💰 My Points":
+        pts = load_json(USERS_FILE).get(uid, {}).get("points", 0)
+        send_message(uid, f"🎁 Your Points: {pts}")
+
+    elif text == "🏧 Redeem":
+        users = load_json(USERS_FILE)
+        pts = users.get(uid, {}).get("points", 0)
+
+        if pts < 10:
+            send_message(uid, "❌ Minimum 10 points required to redeem")
+        else:
+            send_message(
+                uid,
+                f"🎁 Your Points: {pts}\n\nSelect redeem option 👇",
+                redeem_kb()
+            )
+
+    return jsonify(ok=True)   # ✅ END ME
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",8000)))
