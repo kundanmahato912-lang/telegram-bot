@@ -198,7 +198,7 @@ def main_menu(is_admin=False):
         ["🏧 Redeem"]
     ]
     if is_admin:
-        kb.append(["🛠 Admin Dashboard"])
+        kb.append(["📊 Admin Stats", "🛠 Admin Dashboard"])
     return {"keyboard": kb, "resize_keyboard": True}
 
 # ===== WEBHOOK =====
@@ -297,6 +297,32 @@ def webhook():
                     f"🎁 Your Points: {pts}\n\nSelect redeem option 👇",
                     redeem_kb()
                 )
+
+    elif text in ["📊 Admin Stats", "/stats"] and int(uid) == ADMIN_ID:
+    users = load_json(USERS_FILE)
+    redeems = load_json(REDEEM_FILE)
+
+    total_users = len(users)
+    scratch_count = sum(1 for u in users.values() if u.get("code"))
+    total_points = sum(u.get("points", 0) for u in users.values())
+    total_referrals = sum(
+        1 for u in users.values() if u.get("referred_by") and u.get("referral_paid")
+    )
+
+    pending = [r for r in redeems.values() if r.get("status") == "pending"]
+    pending_count = len(pending)
+    pending_amount = sum(r.get("amount", 0) for r in pending)
+
+    send_message(
+        uid,
+        "📊 <b>ADMIN STATS</b>\n\n"
+        f"👥 Total Users: {total_users}\n"
+        f"🎟 Scratch Cards Generated: {scratch_count}\n"
+        f"🔗 Successful Referrals: {total_referrals}\n"
+        f"🎁 Total Points Given: {total_points}\n"
+        f"⏳ Pending Redeems: {pending_count}\n"
+        f"💰 Pending Amount: ₹{pending_amount}"
+            )
 
     return jsonify(ok=True)
 
