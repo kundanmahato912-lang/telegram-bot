@@ -1,4 +1,4 @@
-import os, json, random, string, base64
+import os, json, random, string
 from datetime import datetime
 from flask import Flask, request, jsonify
 import requests
@@ -31,7 +31,20 @@ def ensure_files():
 
 ensure_files()
 
-# ===== LOGGING =====
+# ===== STORAGE =====
+
+def load_json(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+# ===== LOG =====
 
 def append_log(text):
     try:
@@ -40,7 +53,7 @@ def append_log(text):
     except:
         pass
 
-# ===== TELEGRAM =====
+# ===== TELEGRAM HELPERS =====
 
 def tg_request(method, payload):
     return requests.post(f"{API_BASE}/{method}", json=payload).json()
@@ -59,25 +72,10 @@ def get_member_status(uid):
         f"{API_BASE}/getChatMember",
         params={"chat_id": CHANNEL_USERNAME, "user_id": uid}
     ).json()
-    return r.get("ok") and r["result"]["status"] in ("member", "administrator", "creator")
+    return r.get("ok") and r["result"]["status"] in ("member","administrator","creator")
 
 def get_safe_username(user):
     return "@" + user["username"] if user.get("username") else f"User_{user['id']}"
-
-# ===== STORAGE =====
-
-def load_json(path):
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return {}
-
-def save_json(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
 
 # ===== REFERRAL =====
 
@@ -97,7 +95,7 @@ def handle_referral(new_uid, ref_uid):
         "points": 0,
         "code": None,
         "referred_by": ref_uid,
-        "referral_paid": False
+        "referral_paid": False   # 🔥 IMPORTANT
     }
     save_json(USERS_FILE, users)
 
@@ -114,8 +112,9 @@ def get_or_create_code(uid, username):
         users[uid] = {
             "username": username,
             "points": 0,
+            "code": None,
             "referred_by": None,
-            "referral_paid": True
+            "referral_paid": False   # 🔥 MUST be False
         }
     else:
         users[uid]["username"] = username
@@ -139,12 +138,12 @@ def join_kb():
         ]
     }
 
-def main_menu(is_admin=False):
+def main_menu(uid):
     kb = [
         ["🎁 Refer & Earn", "💰 My Points"],
         ["🏧 Redeem"]
     ]
-    if is_admin:
+    if int(uid) == ADMIN_ID:
         kb.append(["📊 Admin Stats"])
     return {"keyboard": kb, "resize_keyboard": True}
 
@@ -154,7 +153,7 @@ def main_menu(is_admin=False):
 def webhook():
     update = request.json or {}
 
-    # CALLBACK
+    # ===== CALLBACK =====
     if "callback_query" in update:
         cq = update["callback_query"]
         uid = cq["from"]["id"]
@@ -165,10 +164,10 @@ def webhook():
                 uname = get_safe_username(cq["from"])
                 code = get_or_create_code(uid, uname)
 
-                # 🔥 REFERRAL POINTS FIX
                 users = load_json(USERS_FILE)
                 uid_str = str(uid)
 
+                # 🔥 REFERRAL +2 POINTS
                 if (
                     uid_str in users and
                     users[uid_str].get("referred_by") and
@@ -186,20 +185,22 @@ def webhook():
 
                 send_message(
                     chat_id,
-                    f"🎉 Scratch Card Won!\n\n<code>{code}</code>",
-                    {"inline_keyboard": [[{"text": "🎟 Open Scratch", "url": SCRATCH_LINK}]]}
+                    "🎉 <b>Congratulations!</b> You win a scratch card 🥳\n\n"
+                    "🎟 <b>Scratch Card Code:</b>\n"
+                    f"<code>{code}</code>",
+                    {"inline_keyboard":[[{"text":"🎟 Open Scratch","url":SCRATCH_LINK}]]}
                 )
-                send_message(chat_id, "👇 Choose option", main_menu(uid == ADMIN_ID))
+                send_message(chat_id, "👇 Choose option", main_menu(uid))
             else:
                 send_message(chat_id, "❌ Join channel first", join_kb())
 
         answer_callback_query(cq["id"])
 
-    # MESSAGE
+    # ===== MESSAGE =====
     if "message" in update:
         msg = update["message"]
         uid = msg["chat"]["id"]
-        text = msg.get("text", "")
+        text = msg.get("text","")
 
         if text.startswith("/start"):
             parts = text.split()
@@ -208,18 +209,47 @@ def webhook():
             send_message(uid, "Join channel & verify", join_kb())
 
         elif text == "🎁 Refer & Earn":
-            users = load_json(USERS_FILE)
-            pts = users.get(str(uid), {}).get("points", 0)
+            pts = load_json(USERS_FILE).get(str(uid), {}).get("points", 0)
             send_message(
                 uid,
-                f"👥 Refer & Earn\n\n1 Refer = 2 Points\n\n"
-                f"🔗 Link:\n{referral_link(uid)}\n\n"
-                f"🎁 Points: {pts}"
+                "👥 <b>REFER & EARN</b>\n\n"
+                "🔗 1 Refer = <b>2 Points</b>\n"
+                "💰 1 Point = <b>₹1</b>\n\n"
+                "🔗 <b>Your Referral Link:</b>\n"
+                f"{referral_link(uid)}\n\n"
+                f"🎁 <b>Your Points:</b> {pts}"
             )
 
         elif text == "💰 My Points":
             pts = load_json(USERS_FILE).get(str(uid), {}).get("points", 0)
-            send_message(uid, f"🎁 Your Points: {pts}")
+            send_message(uid, f"🎁 <b>Your Points:</b> {pts}")
+
+        elif text == "🏧 Redeem":
+            pts = load_json(USERS_FILE).get(str(uid), {}).get("points", 0)
+            if pts < 10:
+                send_message(uid, "❌ Minimum 10 points required to redeem")
+            else:
+                send_message(uid, f"💰 You have {pts} points\n\nRedeem coming soon 🔜")
+
+        elif text == "📊 Admin Stats" and int(uid) == ADMIN_ID:
+            users = load_json(USERS_FILE)
+
+            total_users = len(users)
+            scratch_count = sum(1 for u in users.values() if u.get("code"))
+            total_points = sum(u.get("points",0) for u in users.values())
+            referrals = sum(
+                1 for u in users.values()
+                if u.get("referred_by") and u.get("referral_paid")
+            )
+
+            send_message(
+                uid,
+                "📊 <b>ADMIN STATS</b>\n\n"
+                f"👥 Total Users: {total_users}\n"
+                f"🎟 Scratch Cards Generated: {scratch_count}\n"
+                f"🔗 Successful Referrals: {referrals}\n"
+                f"🎁 Total Points Given: {total_points}"
+            )
 
     return jsonify(ok=True)
 
@@ -228,4 +258,4 @@ def home():
     return "Bot running"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",8000)))
