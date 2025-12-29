@@ -34,7 +34,7 @@ ensure_files()
 # ===== GITHUB LOGGING =====
 def github_append_log(line):
     token = os.environ.get("GITHUB_TOKEN")
-    repo = os.environ.get("GITHUB_REPO")      # username/repo
+    repo = os.environ.get("GITHUB_REPO")
     branch = os.environ.get("GITHUB_BRANCH", "main")
     path = os.environ.get("GITHUB_LOG_PATH", "logs.txt")
 
@@ -72,7 +72,7 @@ def github_append_log(line):
 
     requests.put(url, headers=headers, json=payload)
 
-# ===== SAFE LOG WRITE (LOCAL + GITHUB) =====
+# ===== SAFE LOG WRITE =====
 def append_log(text):
     try:
         with open(LOG_FILE, "a", encoding="utf-8") as f:
@@ -224,8 +224,11 @@ def webhook():
                     f"Scratch Card Code:\n<code>{code}</code>",
                     {"inline_keyboard":[[{"text":"🎟 Open Scratch","url":SCRATCH_LINK}]]}
                 )
-                send_message(chat_id, "👇 Choose an option",
-                             reply_markup=main_menu(int(uid)==ADMIN_ID))
+                send_message(
+                    chat_id,
+                    "👇 Choose an option",
+                    reply_markup=main_menu(int(uid)==ADMIN_ID)
+                )
             else:
                 send_message(chat_id, "❌ Join channel first", join_kb())
 
@@ -238,11 +241,13 @@ def webhook():
                 return jsonify(ok=True)
 
             r = redeems[rid]
-            r["status"] = "paid" if action == "paid" else "rejected"
+            r["status"] = "paid" if action=="paid" else "rejected"
             save_json(REDEEM_FILE, redeems)
 
-            send_message(r["user_id"],
-                         "✅ Payment sent" if action=="paid" else "❌ Redeem rejected")
+            send_message(
+                r["user_id"],
+                "✅ Payment sent" if action=="paid" else "❌ Redeem rejected"
+            )
 
             append_log(
                 f"{datetime.utcnow()} ADMIN_{r['status']} "
@@ -253,48 +258,47 @@ def webhook():
         return jsonify(ok=True)
 
     # MESSAGE
-if "message" in update:
-    msg = update["message"]
-    uid = str(msg["chat"]["id"])
-    text = msg.get("text", "")
+    if "message" in update:
+        msg = update["message"]
+        uid = str(msg["chat"]["id"])
+        text = msg.get("text","")
 
-    if text.startswith("/start"):
-        parts = text.split()
-        if len(parts) > 1:
-            handle_referral(uid, parts[1])
-        send_message(uid, "Join channel & verify", join_kb())
+        if text.startswith("/start"):
+            parts = text.split()
+            if len(parts) > 1:
+                handle_referral(uid, parts[1])
+            send_message(uid, "Join channel & verify", join_kb())
 
-    elif text == "🎁 Refer & Earn":
-        users = load_json(USERS_FILE)
-        pts = users.get(uid, {}).get("points", 0)
-
-        send_message(
-            uid,
-            "👥 <b>Refer & Earn</b>\n\n"
-            "1 Refer = 2 Points\n"
-            "1 Point = ₹1\n\n"
-            f"🔗 Your Referral Link:\n{referral_link(uid)}\n\n"
-            f"🎁 Your Points: {pts}"
-        )
-
-    elif text == "💰 My Points":
-        pts = load_json(USERS_FILE).get(uid, {}).get("points", 0)
-        send_message(uid, f"🎁 Your Points: {pts}")
-
-    elif text == "🏧 Redeem":
-        users = load_json(USERS_FILE)
-        pts = users.get(uid, {}).get("points", 0)
-
-        if pts < 10:
-            send_message(uid, "❌ Minimum 10 points required to redeem")
-        else:
+        elif text == "🎁 Refer & Earn":
+            users = load_json(USERS_FILE)
+            pts = users.get(uid, {}).get("points", 0)
             send_message(
                 uid,
-                f"🎁 Your Points: {pts}\n\nSelect redeem option 👇",
-                redeem_kb()
+                "👥 <b>Refer & Earn</b>\n\n"
+                "1 Refer = 2 Points\n"
+                "1 Point = ₹1\n\n"
+                f"🔗 Your Referral Link:\n{referral_link(uid)}\n\n"
+                f"🎁 Your Points: {pts}"
             )
 
-    return jsonify(ok=True)   # ✅ END ME
+        elif text == "💰 My Points":
+            pts = load_json(USERS_FILE).get(uid, {}).get("points", 0)
+            send_message(uid, f"🎁 Your Points: {pts}")
+
+        elif text == "🏧 Redeem":
+            users = load_json(USERS_FILE)
+            pts = users.get(uid, {}).get("points", 0)
+
+            if pts < 10:
+                send_message(uid, "❌ Minimum 10 points required to redeem")
+            else:
+                send_message(
+                    uid,
+                    f"🎁 Your Points: {pts}\n\nSelect redeem option 👇",
+                    redeem_kb()
+                )
+
+    return jsonify(ok=True)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",8000)))
