@@ -153,10 +153,9 @@ def webhook():
                 code = get_or_create_code(uid, safe_username)
 
                 send_message(
-                    chat_id,
-                    f"🎉 congratulations you win a scratch card 
-                    Scratch Card Code:\n<code>{code}</code>",
-                    {"inline_keyboard":[[{"text":"🎟 Open Scratch","url":SCRATCH_LINK}]]}
+    chat_id,
+    f"🎉 Congratulations! You win a scratch card\nScratch Card Code:\n<code>{code}</code>",
+    {"inline_keyboard":[[{"text":"🎟 Open Scratch","url":SCRATCH_LINK}]]}
                 )
                 send_message(
                     chat_id,
