@@ -18,10 +18,18 @@ BOT_USERNAME = "Scratch_card_00_bot"   # ❌ no @
 ADMIN_ID = 7336276055
 
 USERS_FILE = "users.json"
-LOG_FILE = "logs.txt"
 REDEEM_FILE = "redeems.json"
+LOG_FILE = "logs.txt"
 
 pending_redeem = {}
+
+# ===== SAFE LOG WRITE =====
+def append_log(text):
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(text + "\n")
+    except Exception as e:
+        print("LOG ERROR:", e)
 
 # ===== TELEGRAM HELPERS =====
 def tg_request(method, payload):
@@ -53,8 +61,14 @@ def get_safe_username(user):
 def load_json(path):
     if not os.path.exists(path):
         return {}
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = f.read().strip()
+            if not data:
+                return {}
+            return json.loads(data)
+    except Exception:
+        return {}
 
 def save_json(path, data):
     with open(path, "w", encoding="utf-8") as f:
@@ -102,9 +116,9 @@ def get_or_create_code(uid, username):
     users[uid]["code"] = code
     save_json(USERS_FILE, users)
 
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(f"{datetime.utcnow()} SCRATCH USER:{username} CODE:{code}\n")
-
+    append_log(
+        f"{datetime.utcnow()} SCRATCH USER:{username} CODE:{code}"
+    )
     return code
 
 # ===== UI =====
@@ -140,7 +154,7 @@ def main_menu(is_admin=False):
 def webhook():
     update = request.json or {}
 
-    # CALLBACK
+    # ===== CALLBACK =====
     if "callback_query" in update:
         cq = update["callback_query"]
         uid = str(cq["from"]["id"])
@@ -149,18 +163,19 @@ def webhook():
 
         if data == "verify":
             if get_member_status(uid):
-                safe_username = get_safe_username(cq["from"])
-                code = get_or_create_code(uid, safe_username)
+                uname = get_safe_username(cq["from"])
+                code = get_or_create_code(uid, uname)
 
                 send_message(
-    chat_id,
-    f"🎉 Congratulations! You win a scratch card\nScratch Card Code:\n<code>{code}</code>",
-    {"inline_keyboard":[[{"text":"🎟 Open Scratch","url":SCRATCH_LINK}]]}
+                    chat_id,
+                    f"🎉 Congratulations! You win a scratch card\n\n"
+                    f"Scratch Card Code:\n<code>{code}</code>",
+                    {"inline_keyboard":[[{"text":"🎟 Open Scratch","url":SCRATCH_LINK}]]}
                 )
                 send_message(
                     chat_id,
                     "👇 Choose an option",
-                    reply_markup=main_menu(is_admin=int(uid)==ADMIN_ID)
+                    reply_markup=main_menu(int(uid)==ADMIN_ID)
                 )
 
                 users = load_json(USERS_FILE)
@@ -185,33 +200,54 @@ def webhook():
         elif data.startswith("admin_") and int(uid) == ADMIN_ID:
             _, action, rid = data.split("_")
             redeems = load_json(REDEEM_FILE)
-            r = redeems.get(rid)
-            if not r:
+            if rid not in redeems:
                 return jsonify(ok=True)
 
+            r = redeems[rid]
             r["status"] = "paid" if action=="paid" else "rejected"
             save_json(REDEEM_FILE, redeems)
 
             send_message(
                 r["user_id"],
-                "✅ Payment sent" if action=="paid" else "❌ Redeem rejected"
+                "✅ Payment sent successfully" if action=="paid"
+                else "❌ Redeem rejected"
             )
 
-            with open(LOG_FILE,"a",encoding="utf-8") as f:
-                f.write(
-                    f"{datetime.utcnow()} ADMIN_{r['status']} "
-                    f"USER:{r['username']} AMOUNT:{r['amount']} UPI:{r['upi']}\n"
-                )
+            append_log(
+                f"{datetime.utcnow()} ADMIN_{r['status']} "
+                f"USER:{r['username']} AMOUNT:{r['amount']} UPI:{r['upi']}"
+            )
 
         return jsonify(ok=True)
 
-    # MESSAGE
+    # ===== MESSAGE =====
     if "message" in update:
         msg = update["message"]
         uid = str(msg["chat"]["id"])
         text = msg.get("text","")
 
-        # UPI INPUT
+        # ===== ADMIN DASHBOARD (TOP PRIORITY) =====
+        if text in ["/admin", "🛠 Admin Dashboard"] and int(uid) == ADMIN_ID:
+            redeems = load_json(REDEEM_FILE)
+            pending = {k:v for k,v in redeems.items() if v["status"]=="pending"}
+
+            if not pending:
+                send_message(uid, "✅ No pending redeems")
+                return jsonify(ok=True)
+
+            for rid, r in pending.items():
+                kb = {"inline_keyboard":[[
+                    {"text":"✅ Paid","callback_data":f"admin_paid_{rid}"},
+                    {"text":"❌ Reject","callback_data":f"admin_reject_{rid}"}
+                ]]}
+                send_message(
+                    uid,
+                    f"👤 {r['username']}\n💰 ₹{r['amount']}\n💳 {r['upi']}",
+                    kb
+                )
+            return jsonify(ok=True)
+
+        # ===== UPI INPUT =====
         if uid in pending_redeem:
             amount = pending_redeem.pop(uid)
             users = load_json(USERS_FILE)
@@ -229,36 +265,15 @@ def webhook():
             }
             save_json(REDEEM_FILE, redeems)
 
-            with open(LOG_FILE,"a",encoding="utf-8") as f:
-                f.write(
-                    f"{datetime.utcnow()} REDEEM USER:{users[uid]['username']} "
-                    f"POINTS:{amount} UPI:{text}\n"
-                )
+            append_log(
+                f"{datetime.utcnow()} REDEEM USER:{users[uid]['username']} "
+                f"POINTS:{amount} UPI:{text}"
+            )
 
             send_message(uid, "✅ Redeem request submitted\nPayment within 24 hours")
             return jsonify(ok=True)
 
-        # ADMIN COMMAND ALWAYS WORK
-        if text == "/admin" and int(uid) == ADMIN_ID:
-            redeems = load_json(REDEEM_FILE)
-            pending = {k:v for k,v in redeems.items() if v["status"]=="pending"}
-
-            if not pending:
-                send_message(uid, "✅ No pending redeems")
-                return jsonify(ok=True)
-
-            for rid, r in pending.items():
-                kb = {"inline_keyboard":[[
-                    {"text":"✅ Paid","callback_data":f"admin_paid_{rid}"},
-                    {"text":"❌ Reject","callback_data":f"admin_reject_{rid}"}
-                ]]}
-                send_message(uid,
-                    f"👤 {r['username']}\n💰 ₹{r['amount']}\n💳 {r['upi']}",
-                    kb
-                )
-            return jsonify(ok=True)
-
-        # START
+        # ===== START =====
         if text.startswith("/start"):
             parts = text.split()
             if len(parts) > 1:
