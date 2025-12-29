@@ -300,6 +300,35 @@ def webhook():
                     redeem_kb()
                 )
 
+        elif text == "🛠 Admin Dashboard" and int(uid) == ADMIN_ID:
+    redeems = load_json(REDEEM_FILE)
+
+    pending = {
+        k: v for k, v in redeems.items()
+        if v.get("status") == "pending"
+    }
+
+    if not pending:
+        send_message(uid, "✅ No pending redeems")
+        return jsonify(ok=True)
+
+    for rid, r in pending.items():
+        kb = {
+            "inline_keyboard": [[
+                {"text": "✅ Paid", "callback_data": f"admin_paid_{rid}"},
+                {"text": "❌ Reject", "callback_data": f"admin_reject_{rid}"}
+            ]]
+        }
+
+        send_message(
+            uid,
+            f"🏧 <b>REDEEM REQUEST</b>\n\n"
+            f"👤 User: {r['username']}\n"
+            f"💰 Amount: ₹{r['amount']}\n"
+            f"🏦 UPI: <code>{r['upi']}</code>",
+            reply_markup=kb
+        )
+
         elif text in ["📊 Admin Stats", "/stats"] and int(uid) == ADMIN_ID:
             users = load_json(USERS_FILE)
             redeems = load_json(REDEEM_FILE)
