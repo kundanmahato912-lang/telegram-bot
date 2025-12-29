@@ -1,5 +1,5 @@
 # app.py
-import os, json, random, string
+import os, json, random, string, base64
 from datetime import datetime
 from flask import Flask, request, jsonify
 import requests
@@ -23,19 +23,56 @@ LOG_FILE = "logs.txt"
 
 pending_redeem = {}
 
-# ===== ENSURE FILES EXIST (CRITICAL) =====
+# ===== ENSURE FILES EXIST =====
 def ensure_files():
     for f in [USERS_FILE, REDEEM_FILE, LOG_FILE]:
         if not os.path.exists(f):
             with open(f, "w", encoding="utf-8") as fp:
-                if f.endswith(".json"):
-                    fp.write("{}")
-                else:
-                    fp.write("")
-
+                fp.write("{}" if f.endswith(".json") else "")
 ensure_files()
 
-# ===== SAFE LOG WRITE =====
+# ===== GITHUB LOGGING =====
+def github_append_log(line):
+    token = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPO")      # username/repo
+    branch = os.environ.get("GITHUB_BRANCH", "main")
+    path = os.environ.get("GITHUB_LOG_PATH", "logs.txt")
+
+    if not token or not repo:
+        return
+
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github+json"
+    }
+
+    url = f"https://api.github.com/repos/{repo}/contents/{path}"
+    r = requests.get(url, headers=headers, params={"ref": branch})
+
+    content = ""
+    sha = None
+
+    if r.status_code == 200:
+        data = r.json()
+        sha = data["sha"]
+        content = base64.b64decode(data["content"]).decode("utf-8")
+    elif r.status_code != 404:
+        return
+
+    content += line + "\n"
+    encoded = base64.b64encode(content.encode()).decode()
+
+    payload = {
+        "message": f"append log {datetime.utcnow().isoformat()}",
+        "content": encoded,
+        "branch": branch
+    }
+    if sha:
+        payload["sha"] = sha
+
+    requests.put(url, headers=headers, json=payload)
+
+# ===== SAFE LOG WRITE (LOCAL + GITHUB) =====
 def append_log(text):
     try:
         with open(LOG_FILE, "a", encoding="utf-8") as f:
@@ -43,7 +80,12 @@ def append_log(text):
             f.flush()
             os.fsync(f.fileno())
     except Exception as e:
-        print("LOG ERROR:", e)
+        print("LOCAL LOG ERROR:", e)
+
+    try:
+        github_append_log(text)
+    except Exception as e:
+        print("GITHUB LOG ERROR:", e)
 
 # ===== TELEGRAM HELPERS =====
 def tg_request(method, payload):
@@ -77,10 +119,8 @@ def load_json(path):
         return {}
     try:
         with open(path, "r", encoding="utf-8") as f:
-            data = f.read().strip()
-            if not data:
-                return {}
-            return json.loads(data)
+            d = f.read().strip()
+            return json.loads(d) if d else {}
     except Exception:
         return {}
 
@@ -130,9 +170,7 @@ def get_or_create_code(uid, username):
     users[uid]["code"] = code
     save_json(USERS_FILE, users)
 
-    append_log(
-        f"{datetime.utcnow()} SCRATCH USER:{username} CODE:{code}"
-    )
+    append_log(f"{datetime.utcnow()} SCRATCH USER:{username} CODE:{code}")
     return code
 
 # ===== UI =====
@@ -168,7 +206,7 @@ def main_menu(is_admin=False):
 def webhook():
     update = request.json or {}
 
-    # ===== CALLBACK =====
+    # CALLBACK
     if "callback_query" in update:
         cq = update["callback_query"]
         uid = str(cq["from"]["id"])
@@ -186,38 +224,14 @@ def webhook():
                     f"Scratch Card Code:\n<code>{code}</code>",
                     {"inline_keyboard":[[{"text":"🎟 Open Scratch","url":SCRATCH_LINK}]]}
                 )
-                send_message(
-                    chat_id,
-                    "👇 Choose an option",
-                    reply_markup=main_menu(int(uid)==ADMIN_ID)
-                )
-
-                users = load_json(USERS_FILE)
-                ref = users[uid].get("referred_by")
-                if ref and not users[uid]["referral_paid"] and ref in users:
-                    users[ref]["points"] += 2
-                    users[uid]["referral_paid"] = True
-                    save_json(USERS_FILE, users)
-                    send_message(ref, f"🎉 Your refer completed\nYour points - ({users[ref]['points']})")
+                send_message(chat_id, "👇 Choose an option",
+                             reply_markup=main_menu(int(uid)==ADMIN_ID))
             else:
                 send_message(chat_id, "❌ Join channel first", join_kb())
 
-        elif data.startswith("redeem_"):
-            need = int(data.split("_")[1])
-            users = load_json(USERS_FILE)
-            if users.get(uid,{}).get("points",0) < need:
-                answer_callback_query(cq["id"], "Not enough points ❌")
-            else:
-                pending_redeem[uid] = need
-                send_message(chat_id, "💳 Enter your UPI ID:")
-
         elif data.startswith("admin_") and int(uid) == ADMIN_ID:
             answer_callback_query(cq["id"], "Processing...")
-            parts = data.split("_")
-            if len(parts) != 3:
-                return jsonify(ok=True)
-
-            _, action, rid = parts
+            _, action, rid = data.split("_")
             redeems = load_json(REDEEM_FILE)
             if rid not in redeems:
                 answer_callback_query(cq["id"], "Already done")
@@ -227,11 +241,8 @@ def webhook():
             r["status"] = "paid" if action == "paid" else "rejected"
             save_json(REDEEM_FILE, redeems)
 
-            send_message(
-                r["user_id"],
-                "✅ Payment sent successfully" if action == "paid"
-                else "❌ Redeem rejected"
-            )
+            send_message(r["user_id"],
+                         "✅ Payment sent" if action=="paid" else "❌ Redeem rejected")
 
             append_log(
                 f"{datetime.utcnow()} ADMIN_{r['status']} "
@@ -241,84 +252,17 @@ def webhook():
 
         return jsonify(ok=True)
 
-    # ===== MESSAGE =====
+    # MESSAGE
     if "message" in update:
         msg = update["message"]
         uid = str(msg["chat"]["id"])
         text = msg.get("text","")
 
-        # ===== ADMIN DASHBOARD =====
-        if text in ["/admin", "🛠 Admin Dashboard"] and int(uid) == ADMIN_ID:
-            redeems = load_json(REDEEM_FILE)
-            pending = {k:v for k,v in redeems.items() if v["status"]=="pending"}
-
-            if not pending:
-                send_message(uid, "✅ No pending redeems")
-                return jsonify(ok=True)
-
-            for rid, r in pending.items():
-                kb = {"inline_keyboard":[[
-                    {"text":"✅ Paid","callback_data":f"admin_paid_{rid}"},
-                    {"text":"❌ Reject","callback_data":f"admin_reject_{rid}"}
-                ]]}
-                send_message(
-                    uid,
-                    f"👤 {r['username']}\n💰 ₹{r['amount']}\n💳 {r['upi']}",
-                    kb
-                )
-            return jsonify(ok=True)
-
-        # ===== UPI INPUT =====
-        if uid in pending_redeem:
-            amount = pending_redeem.pop(uid)
-            users = load_json(USERS_FILE)
-            users[uid]["points"] -= amount
-            save_json(USERS_FILE, users)
-
-            redeems = load_json(REDEEM_FILE)
-            rid = str(int(datetime.utcnow().timestamp()))
-            redeems[rid] = {
-                "user_id": uid,
-                "username": users[uid]["username"],
-                "amount": amount,
-                "upi": text,
-                "status": "pending"
-            }
-            save_json(REDEEM_FILE, redeems)
-
-            append_log(
-                f"{datetime.utcnow()} REDEEM USER:{users[uid]['username']} "
-                f"POINTS:{amount} UPI:{text}"
-            )
-
-            send_message(uid, "✅ Redeem request submitted\nPayment within 24 hours")
-            return jsonify(ok=True)
-
-        # ===== START =====
         if text.startswith("/start"):
             parts = text.split()
             if len(parts) > 1:
                 handle_referral(uid, parts[1])
             send_message(uid, "Join channel & verify", join_kb())
-
-        elif text in ["🎁 Refer & Earn", "/refer"]:
-            users = load_json(USERS_FILE)
-            pts = users.get(uid,{}).get("points",0)
-            send_message(uid,
-                "👥 <b>Refer & Earn</b>\n\n"
-                "1 Refer = 2 Points\n"
-                "1 Point = ₹1\n\n"
-                f"{referral_link(uid)}\n\n"
-                f"🎁 Your Points - ({pts})"
-            )
-
-        elif text in ["💰 My Points", "/points"]:
-            pts = load_json(USERS_FILE).get(uid,{}).get("points",0)
-            send_message(uid, f"🎁 Your Points - ({pts})")
-
-        elif text in ["🏧 Redeem", "/redeem"]:
-            pts = load_json(USERS_FILE).get(uid,{}).get("points",0)
-            send_message(uid, f"🎁 Your Points - ({pts})", redeem_kb())
 
     return jsonify(ok=True)
 
