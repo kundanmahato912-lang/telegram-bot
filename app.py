@@ -2,6 +2,7 @@ import os
 import json
 import random
 import string
+import base64
 from datetime import datetime
 from flask import Flask, request, jsonify
 import requests
@@ -18,13 +19,18 @@ CHANNEL_LINK = "https://t.me/earning_don_00"
 SCRATCH_LINK = "https://scratchcard.page.gd"
 
 BOT_USERNAME = "Scratch_card_00_bot"
-ADMIN_ID = 7336276055
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "7336276055"))
 
 USERS_FILE = "users.json"
 REDEEM_FILE = "redeems.json"
 LOG_FILE = "logs.txt"
 
-# ================= FILES =================
+# GitHub log config (Render env vars)
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+GITHUB_REPO = os.environ.get("GITHUB_REPO")          # username/repo
+GITHUB_LOG_PATH = os.environ.get("GITHUB_LOG_PATH", "logs.txt")
+
+# ================= FILE HELPERS =================
 
 def ensure_files():
     for f in [USERS_FILE, REDEEM_FILE, LOG_FILE]:
@@ -45,14 +51,50 @@ def save_json(path, data):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
+# ================= GITHUB LOG PUSH =================
+
+def push_log_to_github(line):
+    if not (GITHUB_TOKEN and GITHUB_REPO):
+        return
+
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_LOG_PATH}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+
+    sha = None
+    old_content = ""
+
+    r = requests.get(url, headers=headers)
+    if r.status_code == 200:
+        data = r.json()
+        sha = data.get("sha")
+        old_content = base64.b64decode(data.get("content", "")).decode()
+
+    new_content = old_content + line + "\n"
+
+    payload = {
+        "message": "Update logs.txt",
+        "content": base64.b64encode(new_content.encode()).decode()
+    }
+    if sha:
+        payload["sha"] = sha
+
+    requests.put(url, headers=headers, json=payload)
+
 def log(text):
     try:
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(text + "\n")
     except:
         pass
+    try:
+        push_log_to_github(text)
+    except:
+        pass
 
-# ================= TELEGRAM =================
+# ================= TELEGRAM HELPERS =================
 
 def tg(method, payload):
     return requests.post(f"{API_BASE}/{method}", json=payload).json()
@@ -80,11 +122,7 @@ def handle_referral(new_uid, ref_uid):
     new_uid = str(new_uid)
     ref_uid = str(ref_uid)
 
-    if new_uid == ref_uid:
-        return
-    if new_uid in users:
-        return
-    if ref_uid not in users:
+    if new_uid == ref_uid or new_uid in users or ref_uid not in users:
         return
 
     users[new_uid] = {
@@ -163,7 +201,7 @@ def redeem_kb():
 def webhook():
     up = request.json or {}
 
-    # ---------- CALLBACK ----------
+    # ----- CALLBACK QUERY -----
     if "callback_query" in up:
         cq = up["callback_query"]
         uid = str(cq["from"]["id"])
@@ -209,7 +247,7 @@ def webhook():
 
         tg("answerCallbackQuery", {"callback_query_id": cq["id"]})
 
-    # ---------- MESSAGE ----------
+    # ----- MESSAGE -----
     if "message" in up:
         m = up["message"]
         uid = str(m["chat"]["id"])
