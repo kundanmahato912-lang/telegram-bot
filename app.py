@@ -247,6 +247,7 @@ if "message" in up:
             f"🎁 Total Points: {total_points}\n"
             f"💸 Redeems: {total_redeems}"
                 )
+        
     return jsonify(ok=True)
 
 @app.route("/")
