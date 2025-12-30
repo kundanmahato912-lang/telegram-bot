@@ -36,7 +36,10 @@ def ensure_files():
     for f in [USERS_FILE, REDEEM_FILE, LOG_FILE]:
         if not os.path.exists(f):
             with open(f, "w", encoding="utf-8") as fp:
-                fp.write("{}" if f.endswith(".json") else "")
+                if f == REDEEM_FILE:
+                    fp.write("[]")
+                else:
+                    fp.write("{}" if f.endswith(".json") else "")
 
 ensure_files()
 
@@ -45,7 +48,7 @@ def load_json(path):
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except:
-        return {}
+        return {} if path != REDEEM_FILE else []
 
 def save_json(path, data):
     with open(path, "w", encoding="utf-8") as f:
@@ -106,10 +109,8 @@ def send(chat_id, text, reply_markup=None):
     tg("sendMessage", data)
 
 def is_member(uid):
-    r = requests.get(
-        f"{API_BASE}/getChatMember",
-        params={"chat_id": CHANNEL_USERNAME, "user_id": uid}
-    ).json()
+    r = requests.get(f"{API_BASE}/getChatMember",
+                     params={"chat_id": CHANNEL_USERNAME, "user_id": uid}).json()
     return r.get("ok") and r["result"]["status"] in ("member", "administrator", "creator")
 
 def uname(user):
@@ -239,14 +240,11 @@ def webhook():
         elif data.startswith("redeem_"):
             amt = int(data.split("_")[1])
             if users.get(uid, {}).get("points", 0) < amt:
-                tg(
-                    "answerCallbackQuery",
-                    {
-                        "callback_query_id": cq["id"],
-                        "text": f"❌ Not enough points\nYour points: {users.get(uid, {}).get('points', 0)}",
-                        "show_alert": True
-                    }
-                )
+                tg("answerCallbackQuery", {
+                    "callback_query_id": cq["id"],
+                    "text": f"❌ Not enough points\nYour points: {users.get(uid, {}).get('points', 0)}",
+                    "show_alert": True
+                })
                 return jsonify(ok=True)
 
             users[uid]["redeem_pending"] = amt
@@ -262,6 +260,9 @@ def webhook():
         txt = m.get("text", "")
         users = load_json(USERS_FILE)
         redeems = load_json(REDEEM_FILE)
+
+        if isinstance(redeems, dict):
+            redeems = []
 
         if txt.startswith("/start"):
             p = txt.split()
@@ -295,6 +296,10 @@ def webhook():
 
             name = uname(m["from"])
             log(f"{datetime.utcnow()} REDEEM | Name:{name} | UPI:{txt} | Points:{amt}")
+
+            # Record redemption in redeems.json
+            redeems.append({"name": name, "upi": txt, "points": amt, "time": str(datetime.utcnow())})
+            save_json(REDEEM_FILE, redeems)
 
             send(
                 uid,
