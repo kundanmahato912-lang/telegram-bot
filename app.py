@@ -1,11 +1,11 @@
 import os
-import json
 import random
 import string
-import base64
 from datetime import datetime
 from flask import Flask, request, jsonify
 import requests
+import psycopg2
+import re
 
 app = Flask(__name__)
 
@@ -21,81 +21,45 @@ SCRATCH_LINK = "https://scratchcard.page.gd"
 BOT_USERNAME = "Scratch_card_00_bot"
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "7336276055"))
 
-USERS_FILE = "users.json"
-REDEEM_FILE = "redeems.json"
-LOG_FILE = "logs.txt"
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
-# GitHub log config (Render env vars)
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
-GITHUB_REPO = os.environ.get("GITHUB_REPO")          # username/repo
-GITHUB_LOG_PATH = os.environ.get("GITHUB_LOG_PATH", "logs.txt")
+UPI_REGEX = r"^[\w.\-]{2,256}@[a-zA-Z]{2,64}$"
 
-# ================= FILE HELPERS =================
+# ================= DATABASE =================
 
-def ensure_files():
-    for f in [USERS_FILE, REDEEM_FILE, LOG_FILE]:
-        if not os.path.exists(f):
-            with open(f, "w", encoding="utf-8") as fp:
-                if f == REDEEM_FILE:
-                    fp.write("[]")
-                else:
-                    fp.write("{}" if f.endswith(".json") else "")
+conn = psycopg2.connect(DATABASE_URL)
+conn.autocommit = True
 
-ensure_files()
+def db():
+    return conn.cursor()
 
-def load_json(path):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return {} if path != REDEEM_FILE else []
+def init_db():
+    cur = db()
 
-def save_json(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id BIGINT PRIMARY KEY,
+        username TEXT,
+        points INTEGER DEFAULT 0,
+        code TEXT,
+        referred_by BIGINT,
+        referral_paid BOOLEAN DEFAULT FALSE,
+        redeem_pending INTEGER DEFAULT 0
+    )
+    """)
 
-# ================= GITHUB LOG PUSH =================
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS redeems (
+        id SERIAL PRIMARY KEY,
+        user_id BIGINT,
+        username TEXT,
+        upi TEXT,
+        points INTEGER,
+        time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
 
-def push_log_to_github(line):
-    if not (GITHUB_TOKEN and GITHUB_REPO):
-        return
-
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_LOG_PATH}"
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-
-    sha = None
-    old_content = ""
-
-    r = requests.get(url, headers=headers)
-    if r.status_code == 200:
-        data = r.json()
-        sha = data.get("sha")
-        old_content = base64.b64decode(data.get("content", "")).decode()
-
-    new_content = old_content + line + "\n"
-
-    payload = {
-        "message": "Update logs.txt",
-        "content": base64.b64encode(new_content.encode()).decode()
-    }
-    if sha:
-        payload["sha"] = sha
-
-    requests.put(url, headers=headers, json=payload)
-
-def log(text):
-    try:
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(text + "\n")
-    except:
-        pass
-    try:
-        push_log_to_github(text)
-    except:
-        pass
+init_db()
 
 # ================= TELEGRAM HELPERS =================
 
@@ -109,32 +73,68 @@ def send(chat_id, text, reply_markup=None):
     tg("sendMessage", data)
 
 def is_member(uid):
-    r = requests.get(f"{API_BASE}/getChatMember",
-                     params={"chat_id": CHANNEL_USERNAME, "user_id": uid}).json()
+    r = requests.get(
+        f"{API_BASE}/getChatMember",
+        params={"chat_id": CHANNEL_USERNAME, "user_id": uid}
+    ).json()
     return r.get("ok") and r["result"]["status"] in ("member", "administrator", "creator")
 
 def uname(user):
     return "@" + user["username"] if user.get("username") else f"User_{user['id']}"
 
-# ================= REFERRAL =================
+# ================= USERS =================
+
+def get_user(uid, username=""):
+    cur = db()
+    cur.execute("SELECT * FROM users WHERE user_id=%s", (uid,))
+    user = cur.fetchone()
+
+    if not user:
+        cur.execute(
+            "INSERT INTO users (user_id, username) VALUES (%s,%s)",
+            (uid, username)
+        )
+        cur.execute("SELECT * FROM users WHERE user_id=%s", (uid,))
+        user = cur.fetchone()
+
+    return user
 
 def handle_referral(new_uid, ref_uid):
-    users = load_json(USERS_FILE)
-    new_uid = str(new_uid)
-    ref_uid = str(ref_uid)
-
-    if new_uid == ref_uid or new_uid in users or ref_uid not in users:
+    if new_uid == ref_uid:
         return
 
-    users[new_uid] = {
-        "username": "",
-        "points": 0,
-        "code": None,
-        "referred_by": ref_uid,
-        "referral_paid": False,
-        "redeem_pending": 0
-    }
-    save_json(USERS_FILE, users)
+    cur = db()
+
+    cur.execute("SELECT user_id FROM users WHERE user_id=%s", (new_uid,))
+    if cur.fetchone():
+        return
+
+    cur.execute("SELECT user_id FROM users WHERE user_id=%s", (ref_uid,))
+    if not cur.fetchone():
+        return
+
+    cur.execute(
+        "INSERT INTO users (user_id, referred_by) VALUES (%s,%s)",
+        (new_uid, ref_uid)
+    )
+
+def pay_referral(uid):
+    cur = db()
+    cur.execute(
+        "SELECT referred_by, referral_paid FROM users WHERE user_id=%s",
+        (uid,)
+    )
+    row = cur.fetchone()
+
+    if row and row[0] and not row[1]:
+        cur.execute(
+            "UPDATE users SET points = points + 2 WHERE user_id=%s",
+            (row[0],)
+        )
+        cur.execute(
+            "UPDATE users SET referral_paid=TRUE WHERE user_id=%s",
+            (uid,)
+        )
 
 def ref_link(uid):
     return f"https://t.me/{BOT_USERNAME}?start={uid}"
@@ -142,29 +142,18 @@ def ref_link(uid):
 # ================= SCRATCH =================
 
 def scratch(uid, name):
-    users = load_json(USERS_FILE)
-    uid = str(uid)
+    cur = db()
+    cur.execute("SELECT code FROM users WHERE user_id=%s", (uid,))
+    row = cur.fetchone()
 
-    if uid not in users:
-        users[uid] = {
-            "username": name,
-            "points": 0,
-            "code": None,
-            "referred_by": None,
-            "referral_paid": False,
-            "redeem_pending": 0
-        }
+    if row and row[0]:
+        return row[0]
 
-    users[uid]["username"] = name
-
-    if users[uid]["code"]:
-        code = users[uid]["code"]
-    else:
-        code = "".join(random.choices(string.digits, k=8))
-        users[uid]["code"] = code
-        save_json(USERS_FILE, users)
-
-    log(f"{datetime.utcnow()} SCRATCH | Name:{name} | Code:{code}")
+    code = "".join(random.choices(string.digits, k=8))
+    cur.execute(
+        "UPDATE users SET code=%s, username=%s WHERE user_id=%s",
+        (code, name, uid)
+    )
     return code
 
 # ================= KEYBOARDS =================
@@ -198,27 +187,22 @@ def redeem_kb():
 
 # ================= WEBHOOK =================
 
-@app.route("/webhook", methods=["POST"])
+@app.route(f"/webhook/{BOT_TOKEN}", methods=["POST"])
 def webhook():
     up = request.json or {}
 
-    # ----- CALLBACK QUERY -----
+    # CALLBACK
     if "callback_query" in up:
         cq = up["callback_query"]
-        uid = str(cq["from"]["id"])
+        uid = int(cq["from"]["id"])
         data = cq["data"]
-        users = load_json(USERS_FILE)
 
         if data == "verify":
             if is_member(uid):
                 name = uname(cq["from"])
+                get_user(uid, name)
                 code = scratch(uid, name)
-
-                if users.get(uid, {}).get("referred_by") and not users[uid]["referral_paid"]:
-                    ref = users[uid]["referred_by"]
-                    users[ref]["points"] += 2
-                    users[uid]["referral_paid"] = True
-                    save_json(USERS_FILE, users)
+                pay_referral(uid)
 
                 send(
                     uid,
@@ -239,82 +223,89 @@ def webhook():
 
         elif data.startswith("redeem_"):
             amt = int(data.split("_")[1])
-            if users.get(uid, {}).get("points", 0) < amt:
+            cur = db()
+            cur.execute("SELECT points FROM users WHERE user_id=%s", (uid,))
+            pts = cur.fetchone()[0]
+
+            if pts < amt:
                 tg("answerCallbackQuery", {
                     "callback_query_id": cq["id"],
-                    "text": f"❌ Not enough points\nYour points: {users.get(uid, {}).get('points', 0)}",
+                    "text": f"❌ Not enough points\nYour points: {pts}",
                     "show_alert": True
                 })
                 return jsonify(ok=True)
 
-            users[uid]["redeem_pending"] = amt
-            save_json(USERS_FILE, users)
+            cur.execute(
+                "UPDATE users SET redeem_pending=%s WHERE user_id=%s",
+                (amt, uid)
+            )
             send(uid, "💰 Enter your UPI ID:")
 
         tg("answerCallbackQuery", {"callback_query_id": cq["id"]})
 
-    # ----- MESSAGE -----
+    # MESSAGE
     if "message" in up:
         m = up["message"]
-        uid = str(m["chat"]["id"])
+        uid = int(m["chat"]["id"])
         txt = m.get("text", "")
-        users = load_json(USERS_FILE)
-        redeems = load_json(REDEEM_FILE)
-
-        if isinstance(redeems, dict):
-            redeems = []
 
         if txt.startswith("/start"):
             p = txt.split()
             if len(p) > 1:
-                handle_referral(uid, p[1])
+                handle_referral(uid, int(p[1]))
             send(uid, "Join channel & verify", join_kb())
 
         elif txt == "🎁 Refer & Earn":
-            pts = users.get(uid, {}).get("points", 0)
-            send(
-                uid,
-                "👥 <b>Refer & Earn</b>\n\n"
-                "1 Refer = <b>2 Points</b>\n"
-                "1 Point = <b>₹1</b>\n\n"
-                "🔗 <b>Your Referral Link:</b>\n"
-                f"{ref_link(uid)}\n\n"
-                f"🎁 <b>Your Points:</b> {pts}"
+            cur = db()
+            cur.execute("SELECT points FROM users WHERE user_id=%s", (uid,))
+            pts = cur.fetchone()[0]
+            send(uid,
+                f"👥 <b>Refer & Earn</b>\n\n"
+                f"1 Refer = 2 Points\n\n"
+                f"🔗 Link:\n{ref_link(uid)}\n\n"
+                f"🎁 Points: {pts}"
             )
 
         elif txt == "💰 My Points":
-            send(uid, f"🎁 <b>Your Points:</b> {users.get(uid, {}).get('points', 0)}")
+            cur = db()
+            cur.execute("SELECT points FROM users WHERE user_id=%s", (uid,))
+            send(uid, f"🎁 Your Points: {cur.fetchone()[0]}")
 
         elif txt == "🏧 Redeem":
-            send(uid, f"🎁 YOUR POINTS - ({users.get(uid, {}).get('points', 0)})", redeem_kb())
+            cur = db()
+            cur.execute("SELECT points FROM users WHERE user_id=%s", (uid,))
+            send(uid, f"🎁 YOUR POINTS ({cur.fetchone()[0]})", redeem_kb())
 
-        elif "@" in txt and users.get(uid, {}).get("redeem_pending", 0) > 0:
-            amt = users[uid]["redeem_pending"]
-            users[uid]["points"] -= amt
-            users[uid]["redeem_pending"] = 0
-            save_json(USERS_FILE, users)
-
-            name = uname(m["from"])
-            log(f"{datetime.utcnow()} REDEEM | Name:{name} | UPI:{txt} | Points:{amt}")
-
-            # Record redemption in redeems.json
-            redeems.append({"name": name, "upi": txt, "points": amt, "time": str(datetime.utcnow())})
-            save_json(REDEEM_FILE, redeems)
-
-            send(
-                uid,
-                "✅ Your points redeemed successfully\n"
-                "💸 Payment will be sent within 24 hours\n\n"
-                f"🎁 Your current points - ({users[uid]['points']})"
+        elif re.match(UPI_REGEX, txt):
+            cur = db()
+            cur.execute(
+                "SELECT points, redeem_pending, username FROM users WHERE user_id=%s",
+                (uid,)
             )
+            pts, amt, username = cur.fetchone()
 
-        elif txt == "📊 Admin Stats" and int(uid) == ADMIN_ID:
-            send(
-                uid,
-                "📊 <b>ADMIN STATS</b>\n\n"
-                f"👥 Users: {len(users)}\n"
-                f"🎁 Total Points: {sum(u.get('points', 0) for u in users.values())}\n"
-                f"💸 Redeems: {len(redeems)}"
+            if amt > 0 and pts >= amt:
+                cur.execute(
+                    "UPDATE users SET points=points-%s, redeem_pending=0 WHERE user_id=%s",
+                    (amt, uid)
+                )
+                cur.execute(
+                    "INSERT INTO redeems (user_id, username, upi, points) VALUES (%s,%s,%s,%s)",
+                    (uid, username, txt, amt)
+                )
+                send(uid, f"✅ Redeem successful\n🎁 Remaining points: {pts-amt}")
+
+        elif txt == "📊 Admin Stats" and uid == ADMIN_ID:
+            cur = db()
+            cur.execute("SELECT COUNT(*) FROM users")
+            users = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM redeems")
+            redeems = cur.fetchone()[0]
+
+            send(uid,
+                f"📊 <b>ADMIN STATS</b>\n\n"
+                f"👥 Users: {users}\n"
+                f"💸 Redeems: {redeems}"
             )
 
     return jsonify(ok=True)
