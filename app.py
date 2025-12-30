@@ -261,7 +261,8 @@ def webhook():
             pts = cur.fetchone()[0]
             send(uid,
                 f"👥 <b>Refer & Earn</b>\n\n"
-                f"1 Refer = 2 Points\n\n"
+                f"1 Refer = <b>2 Points</b>\n\n"
+                f"1 Point = <b>₹1</b>\n\n"
                 f"🔗 Link:\n{ref_link(uid)}\n\n"
                 f"🎁 Points: {pts}"
             )
