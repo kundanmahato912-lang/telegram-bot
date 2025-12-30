@@ -149,7 +149,7 @@ def webhook():
                 code=scratch(uid,name)
                 if users.get(uid,{}).get("referred_by") and not users[uid]["referral_paid"]:
                     r=users[uid]["referred_by"]
-                    users[r]["points"]+=2
+                    users[r]["points"]+=10
                     users[uid]["referral_paid"]=True
                     save_json(USERS_FILE,users)
                 send(uid,f"🎉 Congratulation you win a scratch card\n\nYour code:<code>{code}</code>",
