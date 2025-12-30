@@ -221,8 +221,16 @@ def webhook():
 
                 send(
                     uid,
-                    f"🎉 Congratulations!\n\nYour Scratch Code:\n<code>{code}</code>",
-                    {"inline_keyboard": [[{"text": "🎟 Open Scratch", "url": SCRATCH_LINK}]]}
+                    "🎉 <b>Congratulations!</b> You win a scratch card 🥳\n\n"
+                    "━━━━━━━━━━━━━━━\n"
+                    "🎟 <b>SCRATCH CARD CODE</b>\n\n"
+                    f"<code>{code}</code>\n"
+                    "━━━━━━━━━━━━━━━",
+                    {
+                        "inline_keyboard": [
+                            [{"text": "🎟 Open Scratch", "url": SCRATCH_LINK}]
+                        ]
+                    }
                 )
                 send(uid, "👇 Choose option", menu(uid))
             else:
