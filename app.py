@@ -202,7 +202,7 @@ def webhook():
         elif txt=="🏧 Redeem":
             send(uid,f"🎁 YOUR POINTS - ({users.get(uid,{}).get('points',0)})",redeem_kb())
 
-        elif "@" in txt and users.get(uid,{}).get("redeem_pending"):
+elif "@" in txt and users.get(uid, {}).get("redeem_pending"):
     amt = users[uid]["redeem_pending"]
     users[uid]["points"] -= amt
     users[uid]["redeem_pending"] = 0
@@ -210,7 +210,7 @@ def webhook():
 
     name = uname(m["from"])
 
-    # ✅ FORCE LOG
+    # ✅ LOG REDEEM (OLD CODE JAISA)
     log(
         f"{datetime.utcnow()} REDEEM | "
         f"Name:{name} | UPI:{txt} | Points:{amt}"
@@ -221,7 +221,7 @@ def webhook():
         "✅ Your points redeemed successfully\n"
         "💸 Payment will be sent within 24 hours\n\n"
         f"🎁 Your current points - ({users[uid]['points']})"
-    )
+            )
 
         elif txt=="📊 Admin Stats" and int(uid)==ADMIN_ID:
             send(uid,
