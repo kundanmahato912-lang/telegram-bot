@@ -1,6 +1,7 @@
 import os
 import random
 import string
+import base64
 from datetime import datetime
 from flask import Flask, request, jsonify
 import requests
@@ -24,6 +25,12 @@ ADMIN_ID = int(os.environ.get("ADMIN_ID", "7336276055"))
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 UPI_REGEX = r"^[\w.\-]{2,256}@[a-zA-Z]{2,64}$"
+
+LOG_FILE = "logs.txt"
+
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+GITHUB_REPO = os.environ.get("GITHUB_REPO")  # example: username/repo
+GITHUB_LOG_PATH = os.environ.get("GITHUB_LOG_PATH", "logs.txt")
 
 # ================= DATABASE =================
 
@@ -60,6 +67,50 @@ def init_db():
     """)
 
 init_db()
+
+# ================= GITHUB LOG PUSH =================
+
+def push_log_to_github(line):
+    if not (GITHUB_TOKEN and GITHUB_REPO):
+        return
+
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_LOG_PATH}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+
+    sha = None
+    old_content = ""
+
+    r = requests.get(url, headers=headers)
+    if r.status_code == 200:
+        data = r.json()
+        sha = data.get("sha")
+        old_content = base64.b64decode(data.get("content", "")).decode()
+
+    new_content = old_content + line + "\n"
+
+    payload = {
+        "message": "Update logs.txt",
+        "content": base64.b64encode(new_content.encode()).decode()
+    }
+    if sha:
+        payload["sha"] = sha
+
+    requests.put(url, headers=headers, json=payload)
+
+def log(text):
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(text + "\n")
+    except:
+        pass
+    try:
+        push_log_to_github(text)
+    except:
+        pass
+        
 
 # ================= TELEGRAM HELPERS =================
 
@@ -154,6 +205,8 @@ def scratch(uid, name):
         "UPDATE users SET code=%s, username=%s WHERE user_id=%s",
         (code, name, uid)
     )
+
+    log(f"{datetime.utcnow()} SCRATCH | user:{uid} | code:{code}")
     return code
 
 # ================= KEYBOARDS =================
@@ -294,6 +347,9 @@ def webhook():
                     "INSERT INTO redeems (user_id, username, upi, points) VALUES (%s,%s,%s,%s)",
                     (uid, username, txt, amt)
                 )
+
+                log(f"{datetime.utcnow()} REDEEM | user:{uid} | upi:{txt} | points:{amt}")
+                
                 send(uid, f"✅ Redeem successful\n🎁 Remaining points: {pts-amt}")
 
         elif txt == "📊 Admin Stats" and uid == ADMIN_ID:
