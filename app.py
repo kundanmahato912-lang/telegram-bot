@@ -187,7 +187,7 @@ def redeem_kb():
 
 # ================= WEBHOOK =================
 
-@app.route(f"/webhook/{BOT_TOKEN}", methods=["POST"])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     up = request.json or {}
 
