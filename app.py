@@ -79,22 +79,36 @@ def ref_link(uid):
     return f"https://t.me/{BOT_USERNAME}?start={uid}"
 
 # ===== SCRATCH =====
-def scratch(uid,name):
-    users=load_json(USERS_FILE)
-    uid=str(uid)
+def scratch(uid, name):
+    users = load_json(USERS_FILE)
+    uid = str(uid)
+
     if uid not in users:
-        users[uid]={
-            "username":name,"points":0,"code":None,
-            "referred_by":None,"referral_paid":False,
-            "redeem_pending":0
+        users[uid] = {
+            "username": name,
+            "points": 0,
+            "code": None,
+            "referred_by": None,
+            "referral_paid": False,
+            "redeem_pending": 0
         }
-    users[uid]["username"]=name
+
+    users[uid]["username"] = name
+
+    # 🔥 generate OR reuse code
     if users[uid]["code"]:
-        return users[uid]["code"]
-    code="".join(random.choices(string.digits,k=8))
-    users[uid]["code"]=code
-    save_json(USERS_FILE,users)
-    log(f"{datetime.utcnow()} SCRATCH | Name:{name} | Code:{code}")
+        code = users[uid]["code"]
+    else:
+        code = "".join(random.choices(string.digits, k=8))
+        users[uid]["code"] = code
+        save_json(USERS_FILE, users)
+
+    # ✅ ALWAYS LOG (THIS WAS MISSING)
+    log(
+        f"{datetime.utcnow()} SCRATCH | "
+        f"Name:{name} | Code:{code}"
+    )
+
     return code
 
 # ===== KEYBOARDS =====
@@ -189,23 +203,25 @@ def webhook():
             send(uid,f"🎁 YOUR POINTS - ({users.get(uid,{}).get('points',0)})",redeem_kb())
 
         elif "@" in txt and users.get(uid,{}).get("redeem_pending"):
-            amt=users[uid]["redeem_pending"]
-            users[uid]["points"]-=amt
-            users[uid]["redeem_pending"]=0
-            save_json(USERS_FILE,users)
-            rid=str(len(redeems)+1)
-            redeems[rid]={
-                "user":uname(m["from"]),
-                "upi":txt,"points":amt,
-                "time":str(datetime.utcnow())
-            }
-            save_json(REDEEM_FILE,redeems)
-            log(f"{datetime.utcnow()} REDEEM | Name:{uname(m['from'])} | UPI:{txt} | Points:{amt}")
-            send(uid,
-                "✅ Your points redeemed successfully\n"
-                "💸 Payment will be sent within 24 hours\n\n"
-                f"🎁 Your current points - ({users[uid]['points']})"
-            )
+    amt = users[uid]["redeem_pending"]
+    users[uid]["points"] -= amt
+    users[uid]["redeem_pending"] = 0
+    save_json(USERS_FILE, users)
+
+    name = uname(m["from"])
+
+    # ✅ FORCE LOG
+    log(
+        f"{datetime.utcnow()} REDEEM | "
+        f"Name:{name} | UPI:{txt} | Points:{amt}"
+    )
+
+    send(
+        uid,
+        "✅ Your points redeemed successfully\n"
+        "💸 Payment will be sent within 24 hours\n\n"
+        f"🎁 Your current points - ({users[uid]['points']})"
+    )
 
         elif txt=="📊 Admin Stats" and int(uid)==ADMIN_ID:
             send(uid,
