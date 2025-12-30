@@ -202,34 +202,44 @@ def webhook():
         elif txt=="🏧 Redeem":
             send(uid,f"🎁 YOUR POINTS - ({users.get(uid,{}).get('points',0)})",redeem_kb())
 
-elif "@" in txt and users.get(uid, {}).get("redeem_pending"):
+elif "@" in txt and users.get(uid, {}).get("redeem_pending", 0) > 0:
     amt = users[uid]["redeem_pending"]
-    users[uid]["points"] -= amt
+    users[uid]["points"] = users[uid]["points"] - amt
     users[uid]["redeem_pending"] = 0
     save_json(USERS_FILE, users)
 
     name = uname(m["from"])
 
-    # ✅ LOG REDEEM (OLD CODE JAISA)
     log(
-        f"{datetime.utcnow()} REDEEM | "
-        f"Name:{name} | UPI:{txt} | Points:{amt}"
+        str(datetime.utcnow())
+        + " REDEEM | Name:"
+        + name
+        + " | UPI:"
+        + txt
+        + " | Points:"
+        + str(amt)
     )
 
     send(
         uid,
         "✅ Your points redeemed successfully\n"
         "💸 Payment will be sent within 24 hours\n\n"
-        f"🎁 Your current points - ({users[uid]['points']})"
-            )
+        "🎁 Your current points - (" + str(users[uid]["points"]) + ")"
+    )
 
-        elif txt=="📊 Admin Stats" and int(uid)==ADMIN_ID:
-            send(uid,
-                f"📊 <b>ADMIN STATS</b>\n\n"
-                f"👥 Users: {len(users)}\n"
-                f"🎁 Total Points: {sum(u.get('points',0) for u in users.values())}\n"
-                f"💸 Redeems: {len(redeems)}"
-            )
+ 
+elif txt == "📊 Admin Stats" and int(uid) == ADMIN_ID:
+    total_users = len(users)
+    total_points = sum(u.get("points", 0) for u in users.values())
+    total_redeems = len(redeems)
+
+    send(
+        uid,
+        "📊 <b>ADMIN STATS</b>\n\n"
+        f"👥 Users: {total_users}\n"
+        f"🎁 Total Points: {total_points}\n"
+        f"💸 Redeems: {total_redeems}"
+)
 
     return jsonify(ok=True)
 
