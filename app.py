@@ -172,75 +172,81 @@ def webhook():
 
         tg("answerCallbackQuery",{"callback_query_id":cq["id"]})
 
-    # MESSAGE
-    if "message" in up:
-        m=up["message"]
-        uid=str(m["chat"]["id"])
-        txt=m.get("text","")
-        users=load_json(USERS_FILE)
-        redeems=load_json(REDEEM_FILE)
+# ===== MESSAGE =====
+if "message" in up:
+    m = up["message"]
+    uid = str(m["chat"]["id"])
+    txt = m.get("text", "")
+    users = load_json(USERS_FILE)
+    redeems = load_json(REDEEM_FILE)
 
-        if txt.startswith("/start"):
-            p=txt.split()
-            if len(p)>1: handle_referral(uid,p[1])
-            send(uid,"Join channel & verify",join_kb())
+    if txt.startswith("/start"):
+        p = txt.split()
+        if len(p) > 1:
+            handle_referral(uid, p[1])
+        send(uid, "Join channel & verify", join_kb())
 
-        elif txt=="🎁 Refer & Earn":
-            pts=users.get(uid,{}).get("points",0)
-            send(uid,
-                "👥 <b>Refer & Earn</b>\n\n"
-                "1 Refer = <b>2 Points</b>\n"
-                "1 Point = <b>₹1</b>\n\n"
-                "🔗 <b>Your Referral Link:</b>\n"
-                f"{ref_link(uid)}\n\n"
-                f"🎁 <b>Your Points:</b> {pts}"
-            )
+    elif txt == "🎁 Refer & Earn":
+        pts = users.get(uid, {}).get("points", 0)
+        send(
+            uid,
+            "👥 <b>Refer & Earn</b>\n\n"
+            "1 Refer = <b>2 Points</b>\n"
+            "1 Point = <b>₹1</b>\n\n"
+            "🔗 <b>Your Referral Link:</b>\n"
+            f"{ref_link(uid)}\n\n"
+            f"🎁 <b>Your Points:</b> {pts}"
+        )
 
-        elif txt=="💰 My Points":
-            send(uid,f"🎁 <b>Your Points:</b> {users.get(uid,{}).get('points',0)}")
+    elif txt == "💰 My Points":
+        send(uid, f"🎁 <b>Your Points:</b> {users.get(uid, {}).get('points', 0)}")
 
-        elif txt=="🏧 Redeem":
-            send(uid,f"🎁 YOUR POINTS - ({users.get(uid,{}).get('points',0)})",redeem_kb())
+    elif txt == "🏧 Redeem":
+        send(
+            uid,
+            f"🎁 YOUR POINTS - ({users.get(uid, {}).get('points', 0)})",
+            redeem_kb()
+        )
 
-elif "@" in txt and users.get(uid, {}).get("redeem_pending", 0) > 0:
-    amt = users[uid]["redeem_pending"]
-    users[uid]["points"] = users[uid]["points"] - amt
-    users[uid]["redeem_pending"] = 0
-    save_json(USERS_FILE, users)
+    # UPI INPUT AFTER REDEEM
+    elif "@" in txt and users.get(uid, {}).get("redeem_pending", 0) > 0:
+        amt = users[uid]["redeem_pending"]
+        users[uid]["points"] -= amt
+        users[uid]["redeem_pending"] = 0
+        save_json(USERS_FILE, users)
 
-    name = uname(m["from"])
+        name = uname(m["from"])
 
-    log(
-        str(datetime.utcnow())
-        + " REDEEM | Name:"
-        + name
-        + " | UPI:"
-        + txt
-        + " | Points:"
-        + str(amt)
-    )
+        log(
+            str(datetime.utcnow())
+            + " REDEEM | Name:"
+            + name
+            + " | UPI:"
+            + txt
+            + " | Points:"
+            + str(amt)
+        )
 
-    send(
-        uid,
-        "✅ Your points redeemed successfully\n"
-        "💸 Payment will be sent within 24 hours\n\n"
-        "🎁 Your current points - (" + str(users[uid]["points"]) + ")"
-    )
+        send(
+            uid,
+            "✅ Your points redeemed successfully\n"
+            "💸 Payment will be sent within 24 hours\n\n"
+            f"🎁 Your current points - ({users[uid]['points']})"
+        )
 
- 
-elif txt == "📊 Admin Stats" and int(uid) == ADMIN_ID:
-    total_users = len(users)
-    total_points = sum(u.get("points", 0) for u in users.values())
-    total_redeems = len(redeems)
+    # ADMIN STATS
+    elif txt == "📊 Admin Stats" and int(uid) == ADMIN_ID:
+        total_users = len(users)
+        total_points = sum(u.get("points", 0) for u in users.values())
+        total_redeems = len(redeems)
 
-    send(
-        uid,
-        "📊 <b>ADMIN STATS</b>\n\n"
-        f"👥 Users: {total_users}\n"
-        f"🎁 Total Points: {total_points}\n"
-        f"💸 Redeems: {total_redeems}"
-)
-
+        send(
+            uid,
+            "📊 <b>ADMIN STATS</b>\n\n"
+            f"👥 Users: {total_users}\n"
+            f"🎁 Total Points: {total_points}\n"
+            f"💸 Redeems: {total_redeems}"
+                )
     return jsonify(ok=True)
 
 @app.route("/")
