@@ -133,6 +133,16 @@ def is_member(uid):
 def uname(user):
     return "@" + user["username"] if user.get("username") else f"User_{user['id']}"
 
+def get_display_name(user):
+    if user.get("username"):
+        return "@" + user["username"]
+
+    first = user.get("first_name", "")
+    last = user.get("last_name", "")
+    name = (first + " " + last).strip()
+
+    return name if name else f"User_{user['id']}"
+
 # ================= USERS =================
 
 def get_user(uid, username=""):
@@ -206,7 +216,6 @@ def scratch(uid, name):
         (code, name, uid)
     )
 
-    log(f"{datetime.utcnow()} SCRATCH | user:{uid} | code:{code}")
     return code
 
 # ================= KEYBOARDS =================
@@ -256,6 +265,8 @@ def webhook():
                 get_user(uid, name)
                 code = scratch(uid, name)
                 pay_referral(uid)
+                display = get_display_name(cq["from"])
+                log(f"{datetime.utcnow()} SCRATCH | user:{uid} | name:{display} | code:{code}")
 
                 send(
                     uid,
@@ -348,7 +359,8 @@ def webhook():
                     (uid, username, txt, amt)
                 )
 
-                log(f"{datetime.utcnow()} REDEEM | user:{uid} | upi:{txt} | points:{amt}")
+                display = get_display_name(m["from"])
+                log(f"{datetime.utcnow()} REDEEM | user:{uid} | name:{display} | upi:{txt} | points:{amt}")
                 
                 send(uid, f"✅ Redeem successful\n🎁 Remaining points: {pts-amt}")
 
